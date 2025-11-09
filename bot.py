@@ -7,7 +7,7 @@ from telegram import (
 )
 from telegram.constants import ParseMode
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
@@ -18,7 +18,7 @@ from telegram.ext import (
 # -----------------------
 # CONFIGURATION
 # -----------------------
-BOT_TOKEN = "8011046128:AAGtgSRQ4m_dB8n2dqiKgWf3lFKO0iV7mzI"
+BOT_TOKEN = "8011046128:AAGtgSRQ4m_dB8n2dqiKgWf3lFKO0iV7mzI"   # 🔒 Replace with your new token from BotFather
 CHANNEL_USERNAME = "@shauryavipsignals"
 CHANNEL_LINK = "https://t.me/shauryavipsignals"
 
@@ -115,11 +115,13 @@ async def get_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
 
+    # Always send a new message to avoid "Message is not modified" error
     await query.message.reply_text(
         "📊 Please *enter the last 3 digits* of the period number (e.g., 128):",
         parse_mode=ParseMode.MARKDOWN,
     )
 
+    # Mark that bot is waiting for user input
     context.user_data["awaiting_period"] = True
 
 # -----------------------
@@ -130,7 +132,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.user_data.get("awaiting_period"):
-        return
+        return  # ignore unrelated messages
 
     period_number = update.message.text.strip()
 
@@ -179,8 +181,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN APP
 # -----------------------
 def main():
-    # Use Application instead of ApplicationBuilder for better compatibility
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(joined, pattern="^joined$"))
