@@ -1,5 +1,6 @@
 import logging
 import random
+import asyncio
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -18,7 +19,7 @@ from telegram.ext import (
 # -----------------------
 # CONFIGURATION
 # -----------------------
-BOT_TOKEN = "8011046128:AAGtgSRQ4m_dB8n2dqiKgWf3lFKO0iV7mzI"   # 🔒 Replace with your new token from BotFather
+BOT_TOKEN = "8011046128:AAGtgSRQ4m_dB8n2dqiKgWf3lFKO0iV7mzI"
 CHANNEL_USERNAME = "@shauryavipsignals"
 CHANNEL_LINK = "https://t.me/shauryavipsignals"
 
@@ -178,18 +179,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["awaiting_period"] = False
 
 # -----------------------
+# ERROR HANDLER
+# -----------------------
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+# -----------------------
 # MAIN APP
 # -----------------------
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    try:
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(joined, pattern="^joined$"))
-    app.add_handler(CallbackQueryHandler(get_prediction, pattern="^get_prediction$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CallbackQueryHandler(joined, pattern="^joined$"))
+        app.add_handler(CallbackQueryHandler(get_prediction, pattern="^get_prediction$"))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        
+        app.add_error_handler(error_handler)
 
-    logger.info("✅ Bot is starting...")
-    app.run_polling()
+        logger.info("✅ Bot is starting...")
+        app.run_polling()
+        
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
 
 if __name__ == "__main__":
     main()
