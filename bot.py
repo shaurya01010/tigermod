@@ -1,20 +1,7 @@
 import logging
 import random
-import asyncio
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.constants import ParseMode
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+import telebot
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 # -----------------------
 # CONFIGURATION
@@ -31,6 +18,9 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+# Initialize bot
+bot = telebot.TeleBot(BOT_TOKEN)
 
 # -----------------------
 # HELPER FUNCTIONS
@@ -53,156 +43,132 @@ def get_result(sum_value: int, format_choice: int) -> str:
 # -----------------------
 # CHECK IF USER JOINED CHANNEL
 # -----------------------
-async def is_user_joined(bot, user_id: int) -> bool:
+def is_user_joined(user_id: int) -> bool:
     try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
         return member.status in ["member", "administrator", "creator"]
     except Exception as e:
         logger.warning(f"get_chat_member failed: {e}")
         return False
 
+# Store user states
+user_states = {}
+
 # -----------------------
 # START COMMAND
 # -----------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
+@bot.message_handler(commands=['start'])
+def start(message):
     keyboard = [
         [InlineKeyboardButton("📢 Join Channel", url=CHANNEL_LINK)],
         [InlineKeyboardButton("✅ I Joined", callback_data="joined")],
     ]
-    await update.message.reply_text(
+    markup = InlineKeyboardMarkup(keyboard)
+    bot.send_message(
+        message.chat.id,
         "👋 *Welcome to 91 Club Prediction Bot*\n\n"
         "Please join our official channel to access predictions.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=markup,
+        parse_mode='Markdown'
     )
 
 # -----------------------
-# JOINED BUTTON HANDLER
+# CALLBACK QUERY HANDLER
 # -----------------------
-async def joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query:
-        return
-    await query.answer()
-    user_id = query.from_user.id
-
-    if await is_user_joined(context.bot, user_id):
-        keyboard = [[InlineKeyboardButton("🎯 Get Prediction", callback_data="get_prediction")]]
-        await query.edit_message_text(
-            "✅ You have successfully joined the channel!\n\n"
-            "Click below to get your prediction:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    if call.data == "joined":
+        user_id = call.from_user.id
+        
+        if is_user_joined(user_id):
+            keyboard = [[InlineKeyboardButton("🎯 Get Prediction", callback_data="get_prediction")]]
+            markup = InlineKeyboardMarkup(keyboard)
+            bot.edit_message_text(
+                "✅ You have successfully joined the channel!\n\n"
+                "Click below to get your prediction:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup
+            )
+        else:
+            keyboard = [
+                [InlineKeyboardButton("📢 Join Channel", url=CHANNEL_LINK)],
+                [InlineKeyboardButton("✅ I Joined", callback_data="joined")],
+            ]
+            markup = InlineKeyboardMarkup(keyboard)
+            bot.edit_message_text(
+                "⚠️ You have not joined our channel yet.\n\n"
+                "Please join it first then click *I Joined* again.",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='Markdown'
+            )
+    
+    elif call.data == "get_prediction":
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            "📊 Please *enter the last 3 digits* of the period number (e.g., 128):",
+            parse_mode='Markdown'
         )
-    else:
-        keyboard = [
-            [InlineKeyboardButton("📢 Join Channel", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("✅ I Joined", callback_data="joined")],
-        ]
-        await query.edit_message_text(
-            "⚠️ You have not joined our channel yet.\n\n"
-            "Please join it first then click *I Joined* again.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-# -----------------------
-# GET PREDICTION BUTTON
-# -----------------------
-async def get_prediction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query:
-        return
-    await query.answer()
-
-    # Always send a new message to avoid "Message is not modified" error
-    await query.message.reply_text(
-        "📊 Please *enter the last 3 digits* of the period number (e.g., 128):",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-    # Mark that bot is waiting for user input
-    context.user_data["awaiting_period"] = True
+        user_states[call.from_user.id] = "awaiting_period"
 
 # -----------------------
 # HANDLE USER INPUT
 # -----------------------
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    user_id = message.from_user.id
+    
+    if user_states.get(user_id) == "awaiting_period":
+        period_number = message.text.strip()
 
-    if not context.user_data.get("awaiting_period"):
-        return  # ignore unrelated messages
+        if not period_number.isdigit() or len(period_number) != 3:
+            bot.send_message(message.chat.id, "⚠️ Please enter a valid 3-digit period number (e.g., 128).")
+            return
 
-    period_number = update.message.text.strip()
+        # Build demo 14-digit number
+        demo_number = "1000000000" + period_number
+        if len(demo_number) < 14:
+            demo_number = demo_number.rjust(14, "0")
+        elif len(demo_number) > 14:
+            demo_number = demo_number[-14:]
 
-    if not period_number.isdigit() or len(period_number) != 3:
-        await update.message.reply_text("⚠️ Please enter a valid 3-digit period number (e.g., 128).")
-        return
+        total_sum = sum_digits(demo_number)
+        format_choice = random.choice([1, 2])
+        prediction = get_result(total_sum, format_choice)
+        win_rate = random.randint(70, 95)
 
-    # Build demo 14-digit number
-    demo_number = "1000000000" + period_number
-    if len(demo_number) < 14:
-        demo_number = demo_number.rjust(14, "0")
-    elif len(demo_number) > 14:
-        demo_number = demo_number[-14:]
+        # Map prediction to color
+        if "SMALL" in prediction:
+            color = "🟢 GREEN"
+        elif "BIG" in prediction:
+            color = "🔴 RED"
+        else:
+            color = "🟣 PURPLE"
 
-    total_sum = sum_digits(demo_number)
-    format_choice = random.choice([1, 2])
-    prediction = get_result(total_sum, format_choice)
-    win_rate = random.randint(70, 95)
+        result_msg = (
+            f"❤️ *91 Club:*\n\n"
+            f"🎯 Period Number: {period_number}\n\n"
+            f"🎰 Prediction: {color}\n"
+            f"📈 Type: {prediction}\n"
+            f"🏆 Win Rate: {win_rate}%\n\n"
+            f"✅ This prediction is based on chart study and 91Club analysis."
+        )
 
-    # Map prediction to color
-    if "SMALL" in prediction:
-        color = "🟢 GREEN"
-    elif "BIG" in prediction:
-        color = "🔴 RED"
-    else:
-        color = "🟣 PURPLE"
+        bot.send_message(message.chat.id, result_msg, parse_mode='Markdown')
 
-    result_msg = (
-        f"❤️ *91 Club:*\n\n"
-        f"🎯 Period Number: {period_number}\n\n"
-        f"🎰 Prediction: {color}\n"
-        f"📈 Type: {prediction}\n"
-        f"🏆 Win Rate: {win_rate}%\n\n"
-        f"✅ This prediction is based on chart study and 91Club analysis."
-    )
+        # Ask for next prediction
+        keyboard = [[InlineKeyboardButton("🔁 NEXT RESULT", callback_data="get_prediction")]]
+        markup = InlineKeyboardMarkup(keyboard)
+        bot.send_message(message.chat.id, "Want next prediction?", reply_markup=markup)
 
-    await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN)
-
-    # Ask for next prediction
-    keyboard = [[InlineKeyboardButton("🔁 NEXT RESULT", callback_data="get_prediction")]]
-    await update.message.reply_text("Want next prediction?", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    context.user_data["awaiting_period"] = False
-
-# -----------------------
-# ERROR HANDLER
-# -----------------------
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Exception while handling an update:", exc_info=context.error)
+        user_states[user_id] = None
 
 # -----------------------
 # MAIN APP
 # -----------------------
-def main():
-    try:
-        app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CallbackQueryHandler(joined, pattern="^joined$"))
-        app.add_handler(CallbackQueryHandler(get_prediction, pattern="^get_prediction$"))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
-        app.add_error_handler(error_handler)
-
-        logger.info("✅ Bot is starting...")
-        app.run_polling()
-        
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
-
 if __name__ == "__main__":
-    main()
+    logger.info("✅ Bot is starting...")
+    bot.infinity_polling()
